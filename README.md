@@ -43,4 +43,4 @@ We welcome contributions! Please see here for details: CONTRIBUTING.md
 
 ## License
 
-This project is licensed under the 
+This project is licensed under the: (MIT License)[LICENSE.md].

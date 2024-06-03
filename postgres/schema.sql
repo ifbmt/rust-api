@@ -68,19 +68,22 @@ CREATE TABLE IF NOT EXISTS missionbase.locations (
 
 CREATE TABLE IF NOT EXISTS missionbase.acl_list (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER DEFAULT NULL,
+    group_id INTEGER DEFAULT NULL ,
     action ENUM('view', 'moderate', 'admin') DEFAULT 'view',
     created_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
+-- FIXME: add constraint that either user_id OR group_id must be NULL but not both!
 ADD CONSTRAINT fk_acl_list_user_id FOREIGN KEY (user_id) REFERENCES missionbase.users(id) ON DELETE CASCADE;
 
-CREATE OR REPLACE FUNCTION missionbase.delete_acl_list_item() RETURNS TRIGGER AS $$
-BEGIN
-    DELETE FROM missionbase.acl_list WHERE id = OLD.acl_id;
-    RETURN OLD;
-END;
-$$ LANGUAGE plpgsql;
+--NOTE: if we do this then we won't be able to "share" data and "unsharing" will remove everyone's access to it
+-- CREATE OR REPLACE FUNCTION missionbase.delete_acl_list_item() RETURNS TRIGGER AS $$
+-- BEGIN
+--     DELETE FROM missionbase.acl_list WHERE id = OLD.acl_id;
+--     RETURN OLD;
+-- END;
+-- $$ LANGUAGE plpgsql;
 
 CREATE TABLE IF NOT EXISTS missionbase.addresses (
     id SERIAL PRIMARY KEY,
@@ -111,7 +114,7 @@ ADD CONSTRAINT fk_address_acl_address_id FOREIGN KEY (address_id) REFERENCES mis
 ADD CONSTRAINT fk_address_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_address_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
 
-CREATE TRIGGER delete_address_acl_list_item AFTER DELETE ON missionbase.address_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+-- CREATE TRIGGER delete_address_acl_list_item AFTER DELETE ON missionbase.address_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
 
 CREATE TABLE IF NOT EXISTS missionbase.contact_types (
     id SERIAL PRIMARY KEY,
@@ -163,7 +166,7 @@ ADD CONSTRAINT fk_contact_acl_contact_id FOREIGN KEY (contact_id) REFERENCES mis
 ADD CONSTRAINT fk_contact_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_contact_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
 
-CREATE TRIGGER delete_contact_acl_list_item AFTER DELETE ON missionbase.contact_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+-- CREATE TRIGGER delete_contact_acl_list_item AFTER DELETE ON missionbase.contact_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
 
 CREATE TABLE IF NOT EXISTS missionbase.contact_relation_types (
     id SERIAL PRIMARY KEY,
@@ -215,7 +218,7 @@ ADD CONSTRAINT fk_contact_meta_acl_contact_meta_id FOREIGN KEY (contact_meta_id)
 ADD CONSTRAINT fk_contact_meta_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_contact_meta_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
 
-CREATE TRIGGER delete_contact_meta_acl_list_item AFTER DELETE ON missionbase.contact_meta_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+-- CREATE TRIGGER delete_contact_meta_acl_list_item AFTER DELETE ON missionbase.contact_meta_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
 
 CREATE TABLE IF NOT EXISTS missionbase.address_types (
     id SERIAL PRIMARY KEY,
@@ -251,7 +254,7 @@ ADD CONSTRAINT fk_contact_address_acl_contact_address_id FOREIGN KEY (contact_ad
 ADD CONSTRAINT fk_contact_address_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_contact_address_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
 
-CREATE TRIGGER delete_contact_address_acl_list_item AFTER DELETE ON missionbase.contact_address_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+-- CREATE TRIGGER delete_contact_address_acl_list_item AFTER DELETE ON missionbase.contact_address_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
 
 CREATE TABLE IF NOT EXISTS missionbase.login_history (
     id SERIAL PRIMARY KEY,
@@ -277,6 +280,30 @@ ADD CONSTRAINT fk_groups_contact_id FOREIGN KEY (contact_id) REFERENCES missionb
 
 CREATE TRIGGER groups_updated_datetime BEFORE
 UPDATE ON missionbase.groups FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
+
+ADD CONSTRAINT fk_acl_list_group_id FOREIGN KEY (group_id) REFERENCES missionbase.groups(id) ON DELETE CASCADE;
+
+CREATE TABLE IF NOT EXISTS missionbase.group_identifiers COMMENT 'These are for custom group identifier types' (
+    id SERIAL PRIMARY KEY,
+    group_id INTEGER NOT NULL,
+    identifier VARCHAR(30),
+    format TEXT DEFAULT NULL COMMENT 'TBD How to use this to restrict xid formats'
+)
+ADD CONSTRAINT fk_group_identifiers_group_id FOREIGN KEY (group_id) REFERENCES missionbase.groups(id) ON DELETE CASCADE;
+
+CREATE TABLE IF NOT EXISTS missionbase.group_ids COMMENT 'These are custom id mappings to contacts' (
+    id SERIAL PRIMARY KEY,
+    group_identifier INTEGER NOT NULL,
+    contact_id INTEGER NOT NULL,
+    xid VARCHAR(40) NOT NULL,
+    created_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+ADD CONSTRAINT fk_group_ids_group_identifier FOREIGN KEY (group_identifier) REFERENCES missionbase.group_identifiers(id) ON DELETE CASCADE
+ADD CONSTRAINT fk_group_ids_contact_id FOREIGN KEY (contact_id) REFERENCES missionbase.contacts(id) ON DELETE RESTRICT;
+
+CREATE TRIGGER group_ids_updated_datetime BEFORE
+UPDATE ON missionbase.group_ids FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
 
 CREATE TABLE IF NOT EXISTS missionbase.group_users (
     id SERIAL PRIMARY KEY,
@@ -313,6 +340,7 @@ ADD CONSTRAINT group_rights_unique_group_action UNIQUE (group_id, action);
 CREATE TRIGGER group_rights_updated_datetime BEFORE
 UPDATE ON missionbase.group_rights FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
 
+-- tags can be public or linked to one or more acl allowing a tag to be shared
 CREATE TABLE IF NOT EXISTS missionbase.tags (
     id SERIAL PRIMARY KEY,
     slug VARCHAR(255) NOT NULL,
@@ -331,16 +359,18 @@ UPDATE ON missionbase.tags FOR EACH ROW EXECUTE FUNCTION missionbase.update_upda
 CREATE TABLE IF NOT EXISTS missionbase.tag_acl (
     id SERIAL PRIMARY KEY,
     tag_id INTEGER NOT NULL,
+    primary BOOLEAN DEFAULT TRUE,
     acl_id INTEGER NOT NULL,
     created_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     assigner_id INTEGER DEFAULT NULL
 )
+ADD CONSTRAINT uq_tag_acl_primary UNIQUE (tag_id, primary) WHERE primary = TRUE,
 ADD CONSTRAINT fk_tag_acl_tag_id FOREIGN KEY (tag_id) REFERENCES missionbase.tags(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_tag_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_tag_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
 
-CREATE TRIGGER delete_tag_acl_list_item AFTER DELETE ON missionbase.tag_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+-- CREATE TRIGGER delete_tag_acl_list_item AFTER DELETE ON missionbase.tag_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
 
 CREATE TABLE IF NOT EXISTS missionbase.tag_groups (
     id SERIAL PRIMARY KEY,
@@ -361,7 +391,7 @@ ADD CONSTRAINT fk_tag_group_acl_tag_group_id FOREIGN KEY (tag_group_id) REFERENC
 ADD CONSTRAINT fk_tag_group_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_tag_group_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
 
-CREATE TRIGGER delete_tag_group_acl_list_item AFTER DELETE ON missionbase.tag_group_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+-- CREATE TRIGGER delete_tag_group_acl_list_item AFTER DELETE ON missionbase.tag_group_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
 
 CREATE TABLE IF NOT EXISTS missionbase.tag_groupings (
     id SERIAL PRIMARY KEY,
@@ -503,7 +533,7 @@ ADD CONSTRAINT fk_event_acl_event_id FOREIGN KEY (event_id) REFERENCES missionba
 ADD CONSTRAINT fk_event_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_event_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
 
-CREATE TRIGGER delete_event_acl_list_item AFTER DELETE ON missionbase.event_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+-- CREATE TRIGGER delete_event_acl_list_item AFTER DELETE ON missionbase.event_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
 
 CREATE TABLE IF NOT EXISTS missionbase.event_attendees (
     id SERIAL PRIMARY KEY,
@@ -520,6 +550,9 @@ ADD CONSTRAINT fk_event_attendees_event_id FOREIGN KEY (event_id) REFERENCES mis
 ADD CONSTRAINT fk_event_attendees_contact_id FOREIGN KEY (contact_id) REFERENCES missionbase.contacts(id) ON DELETE CASCADE,
 ADD CONSTRAINT uq_event_attendees UNIQUE (event_id, contact_id);
 
+CREATE TRIGGER event_attendees BEFORE
+UPDATE ON missionbase.event_attendees FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
+
 CREATE TABLE IF NOT EXISTS missionbase.event_meta (
     id SERIAL PRIMARY KEY,
     event_id INTEGER NOT NULL,
@@ -531,6 +564,9 @@ CREATE TABLE IF NOT EXISTS missionbase.event_meta (
 )
 ADD CONSTRAINT fk_event_meta_event_id FOREIGN KEY (event_id) REFERENCES missionbase.events(id) ON DELETE CASCADE
 ADD CONSTRAINT fk_event_meta_meta_type FOREIGN KEY (meta_type) REFERENCES missionbase.meta_types(id) ON DELETE RESTRICT;
+
+CREATE TRIGGER event_meta BEFORE
+UPDATE ON missionbase.event_meta FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
 
 CREATE TABLE IF NOT EXISTS missionbase.event_meta_acl (
     id SERIAL PRIMARY KEY,
@@ -544,4 +580,101 @@ ADD CONSTRAINT fk_event_meta_acl_event_meta_id FOREIGN KEY (event_meta_id) REFER
 ADD CONSTRAINT fk_event_meta_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
 ADD CONSTRAINT fk_event_meta_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
 
-CREATE TRIGGER delete_event_meta_acl_list_item AFTER DELETE ON missionbase.event_meta_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+-- CREATE TRIGGER delete_event_meta_acl_list_item AFTER DELETE ON missionbase.event_meta_acl FOR EACH ROW EXECUTE FUNCTION missionbase.delete_acl_list_item();
+
+CREATE TRIGGER event_meta_acl BEFORE
+UPDATE ON missionbase.event_meta_acl FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
+
+--maybe move these flags to JSON columns because of the complex foriegn key possibilities
+CREATE TABLE IF NOT EXISTS missionbase.flags (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    ref_table VARCHAR(255) NOT NULL,
+    ref_id INTEGER NOT NULL,
+    flag_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    clear_datetime TIMESTAMP DEFAULT NULL,
+    comment TEXT DEFAULT NULL,
+)
+ADD CONSTRAINT fk_flags_user_id FOREIGN KEY (user_id) REFERENCES missionbase.users(id) ON DELETE CASCADE;
+
+CREATE TRIGGER flags BEFORE
+UPDATE ON missionbase.flags FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
+
+CREATE TABLE IF NOT EXISTS missionbase.note_types ();
+
+CREATE TABLE IF NOT EXISTS missionbase.notes (
+    id SERIAL PRIMARY KEY,
+    note_type INTEGER NOT NULL,
+    reply_to INTEGER DEFAULT NULL,
+    ref_table VARCHAR(20) DEFAULT NULL,
+    ref_id INTEGER DEFAULT NULL,
+    creator INTEGER NOT NULL,
+    note TEXT NOT NULL,
+    public BOOLEAN DEFAULT FALSE,
+    created_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+ADD CONSTRAINT fk_notes_type FOREIGN KEY (note_type) REFERENCES missionbase.note_types(id) ON DELETE RESTRICT,
+ADD CONSTRAINT fk_notes_type FOREIGN KEY (reply_to) REFERENCES missionbase.notes(id) ON DELETE CASCADE,
+ADD CONSTRAINT fk_notes_creator FOREIGN KEY (creator) REFERENCES missionbase.users(id) ON DELETE RESTRICT;
+
+CREATE TRIGGER notes BEFORE
+UPDATE ON missionbase.notes FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
+
+--CREATE TRIGGER delete_note_acl_list_item ...
+
+CREATE TABLE IF NOT EXISTS missionbase.notes_acl (
+    id SERIAL PRIMARY KEY,
+    note_id INTEGER NOT NULL,
+    acl_id INTEGER NOT NULL,
+    created_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    assigner_id INTEGER DEFAULT NULL
+)
+ADD CONSTRAINT fk_notes_acl_note_id FOREIGN KEY (note_id) REFERENCES missionbase.notes(id) ON DELETE CASCADE,
+ADD CONSTRAINT fk_notes_acl_acl_id FOREIGN KEY (acl_id) REFERENCES missionbase.acl_list(id) ON DELETE CASCADE,
+ADD CONSTRAINT fk_notes_acl_assigner_id FOREIGN KEY (assigner_id) REFERENCES missionbase.users(id) ON DELETE SET NULL;
+
+-- access to note meta aligns with the acl of the note. TBD if more acl is needed for note meta.
+CREATE TABLE IF NOT EXISTS missionbase.note_meta (
+    id SERIAL PRIMARY KEY,
+    note_id INTEGER NOT NULL,
+    meta_type INTEGER NOT NULL,
+    meta_key VARCHAR(255) NOT NULL,
+    meta_value TEXT DEFAULT NULL,
+    created_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+ADD CONSTRAINT fk_note_meta_note_id FOREIGN KEY (user_id) REFERENCES missionbase.notes(id) ON DELETE CASCADE
+ADD CONSTRAINT fk_note_meta_meta_type FOREIGN KEY (meta_type) REFERENCES missionbase.meta_types(id) ON DELETE RESTRICT;
+
+CREATE TRIGGER note_meta_updated_datetime BEFORE
+UPDATE ON missionbase.note_meta FOR EACH ROW EXECUTE FUNCTION missionbase.update_updated_datetime();
+
+CREATE TABLE IF NOT EXISTS missionbase.edits ();
+
+CREATE TABLE IF NOT EXISTS missionbase.confirmations ();
+
+CREATE TABLE IF NOT EXISTS missionbase.zip_ref ();
+
+CREATE TABLE IF NOT EXISTS missionbase.user_points ();
+
+CREATE TABLE IF NOT EXISTS missionbase.user_activity ();
+
+CREATE TABLE IF NOT EXISTS missionbase.calendars ();
+
+CREATE TABLE IF NOT EXISTS missionbase.calendar_acl ();
+
+CREATE TABLE IF NOT EXISTS missionbase.calendar_events ();
+
+
+
+CREATE TABLE IF NOT EXISTS missionbase.commitments ();
+
+-- income & expenses
+CREATE TABLE IF NOT EXISTS missionbase.transaction ();
+
+-- user & system settings
+CREATE TABLE IF NOT EXISTS missionbase.settings ();
+
+CREATE TABLE IF NOT EXISTS missionbase.tasks ();
